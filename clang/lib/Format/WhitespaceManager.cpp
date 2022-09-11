@@ -353,7 +353,7 @@ AlignTokenSequence(const FormatStyle &Style, unsigned Start, unsigned End,
       unsigned ScopeStart = ScopeStack.back();
       auto ShouldShiftBeAdded = [&] {
         // Function declaration
-        if (Changes[ScopeStart - 1].Tok->is(TT_FunctionDeclarationName))
+        if (Changes[ScopeStart - 1].Tok->isOneOf(TT_FunctionDeclarationName, TT_FunctionDefinitionName))
           return true;
 
         // Lambda.
@@ -362,7 +362,7 @@ AlignTokenSequence(const FormatStyle &Style, unsigned Start, unsigned End,
 
         // Continued function declaration
         if (ScopeStart > Start + 1 &&
-            Changes[ScopeStart - 2].Tok->is(TT_FunctionDeclarationName)) {
+            Changes[ScopeStart - 2].Tok->isOneOf(TT_FunctionDeclarationName, TT_FunctionDefinitionName)) {
           return true;
         }
 
@@ -854,7 +854,7 @@ void WhitespaceManager::alignConsecutiveDeclarations() {
       [](Change const &C) {
         // tok::kw_operator is necessary for aligning operator overload
         // definitions.
-        if (C.Tok->isOneOf(TT_FunctionDeclarationName, tok::kw_operator))
+        if (C.Tok->isOneOf(TT_FunctionDeclarationName, TT_FunctionDefinitionName, tok::kw_operator))
           return true;
         if (C.Tok->isNot(TT_StartOfName))
           return false;
@@ -869,7 +869,7 @@ void WhitespaceManager::alignConsecutiveDeclarations() {
             return false;
           if (!Next->Tok.getIdentifierInfo())
             break;
-          if (Next->isOneOf(TT_StartOfName, TT_FunctionDeclarationName,
+          if (Next->isOneOf(TT_StartOfName, TT_FunctionDeclarationName, TT_FunctionDefinitionName,
                             tok::kw_operator)) {
             return false;
           }

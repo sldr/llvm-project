@@ -2877,6 +2877,128 @@ static bool isFunctionDeclarationName(bool IsCpp, const FormatToken &Current,
   return false;
 }
 
+// This function heuristically determines whether 'Current' starts the name of a
+// function definition.
+static bool isFunctionDefinitionName(bool IsCpp, const FormatToken& Current,
+    const AnnotatedLine& Line) {
+    auto skipOperatorName = [](const FormatToken* Next) -> const FormatToken* {
+        for (; Next; Next = Next->Next) {
+            if (Next->is(TT_OverloadedOperatorLParen))
+                return Next;
+            if (Next->is(TT_OverloadedOperator))
+                continue;
+            if (Next->isOneOf(tok::kw_new, tok::kw_delete)) {
+                // For 'new[]' and 'delete[]'.
+                if (Next->Next &&
+                    Next->Next->startsSequence(tok::l_square, tok::r_square)) {
+                    Next = Next->Next->Next;
+                }
+                continue;
+            }
+            if (Next->startsSequence(tok::l_square, tok::r_square)) {
+                // For operator[]().
+                Next = Next->Next;
+                continue;
+            }
+            if ((Next->isSimpleTypeSpecifier() || Next->is(tok::identifier)) &&
+                Next->Next && Next->Next->isOneOf(tok::star, tok::amp, tok::ampamp)) {
+                // For operator void*(), operator char*(), operator Foo*().
+                Next = Next->Next;
+                continue;
+            }
+            if (Next->is(TT_TemplateOpener) && Next->MatchingParen) {
+                Next = Next->MatchingParen;
+                continue;
+            }
+
+            break;
+        }
+        return nullptr;
+    };
+
+    // Find parentheses of parameter list.
+    const FormatToken* Next = Current.Next;
+    if (Current.is(tok::kw_operator)) {
+        if (Current.Previous && Current.Previous->is(tok::coloncolon))
+            return false;
+        Next = skipOperatorName(Next);
+    }
+    else {
+        if (!Current.is(TT_StartOfName) || Current.NestingLevel != 0)
+            return false;
+        for (; Next; Next = Next->Next) {
+            if (Next->is(TT_TemplateOpener)) {
+                Next = Next->MatchingParen;
+            }
+            else if (Next->is(tok::coloncolon)) {
+                Next = Next->Next;
+                if (!Next)
+                    return false;
+                if (Next->is(tok::kw_operator)) {
+                    Next = skipOperatorName(Next->Next);
+                    break;
+                }
+                if (!Next->is(tok::identifier))
+                    return false;
+            }
+            else if (Next->is(tok::l_paren)) {
+                break;
+            }
+            else {
+                return false;
+            }
+        }
+    }
+
+    // Check whether parameter list can belong to a function declaration.
+    if (!Next || !Next->is(tok::l_paren) || !Next->MatchingParen)
+        return false;
+    // Check if token after matching paren is l_brace
+    if (Next->MatchingParen->nTok && Next->MatchingParen->nTok->is(tok::l_brace)) {
+      return true;
+    }
+    //// If there is an &/&& after the r_paren, this is likely a function.
+    //if (Next->MatchingParen->Next &&
+    //    Next->MatchingParen->Next->is(TT_PointerOrReference)) {
+    //    return true;
+    //}
+
+    // Check for K&R C function definitions (and C++ function definitions with
+    // unnamed parameters), e.g.:
+    //   int f(i)
+    //   {
+    //     return i + 1;
+    //   }
+    //   bool g(size_t = 0, bool b = false)
+    //   {
+    //     return !b;
+    //   }
+    //if (IsCpp && Next->Next && Next->Next->is(tok::identifier) &&
+    //    !Line.endsWith(tok::semi)) {
+    //    return true;
+    //}
+
+    //for (const FormatToken* Tok = Next->Next; Tok && Tok != Next->MatchingParen;
+    //    Tok = Tok->Next) {
+    //    if (Tok->is(TT_TypeDeclarationParen))
+    //        return true;
+    //    if (Tok->isOneOf(tok::l_paren, TT_TemplateOpener) && Tok->MatchingParen) {
+    //        Tok = Tok->MatchingParen;
+    //        continue;
+    //    }
+    //    if (Tok->is(tok::kw_const) || Tok->isSimpleTypeSpecifier() ||
+    //        Tok->isOneOf(TT_PointerOrReference, TT_StartOfName, tok::ellipsis)) {
+    //        return true;
+    //    }
+    //    if (Tok->isOneOf(tok::l_brace, tok::string_literal, TT_ObjCMethodExpr) ||
+    //        Tok->Tok.isLiteral()) {
+    //        return false;
+    //    }
+    //}
+    return false;
+}
+
+
 bool TokenAnnotator::mustBreakForReturnType(const AnnotatedLine &Line) const {
   assert(Line.MightBeFunctionDecl);
 
@@ -2917,8 +3039,35 @@ void TokenAnnotator::calculateFormattingInformation(AnnotatedLine &Line) const {
     calculateArrayInitializerColumnList(Line);
 
   while (Current) {
-    if (isFunctionDeclarationName(Style.isCpp(), *Current, Line))
-      Current->setType(TT_FunctionDeclarationName);
+      if (isFunctionDefinitionName(Style.isCpp(), *Current, Line)) {
+        Current->setType(TT_FunctionDefinitionName);
+        if (Style.BinPackParameters) {
+          //markParameters(Current);
+          if (!Current->nTok || Current->nTok->isNot(tok::l_paren) || !Current->nTok->MatchingParen || Current->nTok->MatchingParen->isNot(tok::r_paren)) {
+            return;
+          }
+          // if '()' do nothing
+          if (Current->nTok->nTok == Current->nTok->MatchingParen) {
+            return;
+          }
+          if (Current->nTok->nTok) {
+            Current->nTok->nTok->MustBreakBefore = true;
+          }
+          if (Current->nTok->Role) {
+            TokenRole* RolePtr = Current->nTok->Role.get();
+            CommaSeparatedList* Commas = (CommaSeparatedList*)RolePtr; // No RTTI so can't use dynamic_cast<CommaSeparatedList*>(RolePtr) or std::dynamic_pointer_cast<CommaSeparatedList>(Current->nTok->Role)
+            size_t CommasSize = Commas->getSize();
+            for (size_t i = 0; i < CommasSize; ++i) {
+              if (Commas->getComma(i)->nTok) {
+                Commas->getComma(i)->nTok->MustBreakBefore = true;
+              }
+            }
+          }
+        }
+      } else {
+        if (isFunctionDeclarationName(Style.isCpp(), *Current, Line))
+          Current->setType(TT_FunctionDeclarationName);
+      }
     const FormatToken *Prev = Current->Previous;
     if (Current->is(TT_LineComment)) {
       if (Prev->is(BK_BracedInit) && Prev->opensScope()) {
@@ -2961,7 +3110,7 @@ void TokenAnnotator::calculateFormattingInformation(AnnotatedLine &Line) const {
       Current->MustBreakBefore =
           Current->MustBreakBefore || mustBreakBefore(Line, *Current);
       if (!Current->MustBreakBefore && InFunctionDecl &&
-          Current->is(TT_FunctionDeclarationName)) {
+          Current->isOneOf(TT_FunctionDeclarationName, TT_FunctionDefinitionName)) {
         Current->MustBreakBefore = mustBreakForReturnType(Line);
       }
     }
@@ -3133,7 +3282,7 @@ unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
       (Right.is(tok::period) && Style.Language == FormatStyle::LK_Proto)) {
     return 500;
   }
-  if (Right.isOneOf(TT_StartOfName, TT_FunctionDeclarationName) ||
+  if (Right.isOneOf(TT_StartOfName, TT_FunctionDeclarationName, TT_FunctionDefinitionName) ||
       Right.is(tok::kw_operator)) {
     if (Line.startsWith(tok::kw_for) && Right.PartOfMultiVariableDeclStmt)
       return 3;
@@ -3647,7 +3796,7 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
     if (Right.is(TT_OverloadedOperatorLParen))
       return spaceRequiredBeforeParens(Right);
     // Function declaration or definition
-    if (Line.MightBeFunctionDecl && (Left.is(TT_FunctionDeclarationName))) {
+    if (Line.MightBeFunctionDecl && (Left.isOneOf(TT_FunctionDeclarationName, TT_FunctionDefinitionName))) {
       if (Line.mightBeFunctionDefinition()) {
         return Style.SpaceBeforeParensOptions.AfterFunctionDefinitionName ||
                spaceRequiredBeforeParens(Right);
@@ -4289,7 +4438,6 @@ bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
   const FormatToken &Left = *Right.Previous;
   if (Right.NewlinesBefore > 1 && Style.MaxEmptyLinesToKeep > 0)
     return true;
-
   if (Style.isCSharp()) {
     if (Left.is(TT_FatArrow) && Right.is(tok::l_brace) &&
         Style.BraceWrapping.AfterFunction) {
@@ -4696,7 +4844,6 @@ bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
     if (!Next->isOneOf(TT_LambdaLSquare, tok::l_brace, tok::caret))
       return true;
   }
-
   return false;
 }
 
@@ -4817,9 +4964,9 @@ bool TokenAnnotator::canBreakBefore(const AnnotatedLine &Line,
     return Line.IsMultiVariableDeclStmt ||
            (getTokenPointerOrReferenceAlignment(Right) ==
                 FormatStyle::PAS_Right &&
-            (!Right.Next || Right.Next->isNot(TT_FunctionDeclarationName)));
+            (!Right.Next || !Right.Next->isOneOf(TT_FunctionDeclarationName, TT_FunctionDefinitionName)));
   }
-  if (Right.isOneOf(TT_StartOfName, TT_FunctionDeclarationName) ||
+  if (Right.isOneOf(TT_StartOfName, TT_FunctionDeclarationName, TT_FunctionDefinitionName) ||
       Right.is(tok::kw_operator)) {
     return true;
   }

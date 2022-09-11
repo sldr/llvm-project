@@ -316,7 +316,7 @@ bool ContinuationIndenter::canBreak(const LineState &State) {
 
   // Don't break after very short return types (e.g. "void") as that is often
   // unexpected.
-  if (Current.is(TT_FunctionDeclarationName) && State.Column < 6) {
+  if (Current.isOneOf(TT_FunctionDeclarationName, TT_FunctionDefinitionName) && State.Column < 6) {
     if (Style.AlwaysBreakAfterReturnType == FormatStyle::RTBS_None)
       return false;
   }
@@ -370,7 +370,7 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
         // sets BreakBeforeParameter to avoid bin packing and this creates a
         // completely unnecessary line break after a template type that isn't
         // line-wrapped.
-        (Previous.NestingLevel == 1 || Style.BinPackParameters)) ||
+        (Previous.NestingLevel == 1 || false /* Style.BinPackParameters */)) ||
        (Style.BreakBeforeTernaryOperators && Current.is(TT_ConditionalExpr) &&
         Previous.isNot(tok::question)) ||
        (!Style.BreakBeforeTernaryOperators &&
@@ -551,7 +551,7 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
   }
 
   // If the return type spans multiple lines, wrap before the function name.
-  if (((Current.is(TT_FunctionDeclarationName) &&
+  if (((Current.isOneOf(TT_FunctionDeclarationName, TT_FunctionDefinitionName) &&
         // Don't break before a C# function when no break after return type
         (!Style.isCSharp() ||
          Style.AlwaysBreakAfterReturnType != FormatStyle::RTBS_None) &&
@@ -1206,7 +1206,7 @@ unsigned ContinuationIndenter::getNewLineColumn(const LineState &State) {
             TT_AttributeParen, TT_AttributeSquare, TT_FunctionAnnotationRParen,
             TT_JavaAnnotation, TT_LeadingJavaAnnotation))) ||
       (!Style.IndentWrappedFunctionNames &&
-       NextNonComment->isOneOf(tok::kw_operator, TT_FunctionDeclarationName))) {
+       NextNonComment->isOneOf(tok::kw_operator, TT_FunctionDeclarationName, TT_FunctionDefinitionName))) {
     return std::max(CurrentState.LastSpace, CurrentState.Indent);
   }
   if (NextNonComment->is(TT_SelectorName)) {

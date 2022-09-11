@@ -106,6 +106,15 @@ std::pair<tooling::Replacements, unsigned> TokenAnalyzer::process() {
 
                        IdentTable);
   ArrayRef<FormatToken *> Toks(Lex.lex());
+  
+  FormatToken* prev = nullptr;
+  for (ArrayRef<FormatToken*>::iterator i = Toks.begin(); i != Toks.end(); ++i) {
+    (*i)->pTok = prev;
+    if (prev) {
+      prev->nTok = *i;
+    }
+    prev = *i;
+  }
   SmallVector<FormatToken *, 10> Tokens(Toks.begin(), Toks.end());
   UnwrappedLineParser Parser(Style, Lex.getKeywords(),
                              Env.getFirstStartColumn(), Tokens, *this);

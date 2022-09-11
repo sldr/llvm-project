@@ -67,6 +67,7 @@ namespace format {
   TYPE(ForEachMacro)                                                           \
   TYPE(FunctionAnnotationRParen)                                               \
   TYPE(FunctionDeclarationName)                                                \
+  TYPE(FunctionDefinitionName)                                                 \
   TYPE(FunctionLBrace)                                                         \
   TYPE(FunctionLikeOrFreestandingMacro)                                        \
   TYPE(FunctionTypeLParen)                                                     \
@@ -253,6 +254,9 @@ struct FormatToken {
 
   /// The \c Token.
   Token Tok;
+
+  FormatToken* pTok = nullptr;
+  FormatToken* nTok = nullptr;
 
   /// The raw text of the token.
   ///
@@ -880,6 +884,10 @@ public:
       return nullptr;
     return Commas.back();
   }
+
+  size_t getSize() const { return this->Commas.size(); }
+
+  const FormatToken* getComma(size_t index) const { return this->Commas[index]; }
 
 private:
   /// A struct that holds information on how to format a given list with

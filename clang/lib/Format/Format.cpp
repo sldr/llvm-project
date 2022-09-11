@@ -2093,7 +2093,7 @@ private:
           if (Prev->is(tok::r_paren) && Prev->MatchingParen) {
             if (const auto *Func =
                     Prev->MatchingParen->getPreviousNonComment()) {
-              if (Func->isOneOf(TT_FunctionDeclarationName, TT_StartOfName,
+              if (Func->isOneOf(TT_FunctionDeclarationName, TT_FunctionDefinitionName, TT_StartOfName,
                                 TT_OverloadedOperator)) {
                 continue;
               }
